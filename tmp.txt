@@ -1,0 +1,43 @@
+
+现更改位置：
+1.tcp_socket.py中：
+    1.1 由于select选择需要对文件描述符操作，故thread_data从io.BytesIO()改成os.pipe()，------为单方向，不可以
+        将对thread_data的读写分别对应读端和写端，即thread_data[0]和thread_data[1]
+    1.2 按个人理解完成了tcp_main函数
+    1.3 将TcpSocket简单封装为FullTCPSocket，使其绑定到"tun144"   (测试有问题)
+2. event_loop.py中：
+    2.1 由于select.EPOLLOUT的值为4，而在tcp_socket.py的_init_tcp函数在add_rule时选用了selectors.EVENT_WRITE，值为2，
+        故将event_loop.py中READ_EVENT和WRITE_EVENT修改为selectors中的对应值
+    2.2 在根据select.select获得readable, writeable后，应该在二者均空时，返回false，故改 or 为 and
+    2.3 something_insterted的检验在获得readable, writeable后，仍应该进行，否则wait_next_event()会一直返回True，
+        之后会在_tcp_loop中不断进入wait_next_event()而陷入死循环
+
+7-28 总结
+
+1. thread_data定义为socketpair(),全双工通信，parent_sock用于连接tcp，child_sock用于连接应用层，p写，则c可读，c写，则p可读
+    1.1 对socketpair的封装，可以继承FdAdapter?
+    1.2 tcp读thread_data,可以直接thread_data.parent_sock.recv(),thread_data读,thread_data.child_sock.recv()
+2. 在add_rule中的fileobj，可以为整数，也可以是具有fileno()函数的封装类（鸭子类）
+3. tcp_connection中，inbound_stream为应用层写入的地方，reaseambler为接收adpter的写入，即outbound_stream
+4. 测试时，可以先测试evenloop的功能，比如进行两个tun之间的通信？
+    4.1 测试可借助wireshark
+    4.2 seg报头要注意加window
+5. tcp_socket 缺少close()函数
+    5.1 send()函数可以先对输入进行类型检测，若为str，则data.encode()
+6. tun设备一般情况下都是可写的，所以一般在可读列表中，需要借助interst来判断是否要写，在接收外来数据后，可读，
+
+8-12 总结
+
+
+1. event_loop.py:
+    删去之前关于something_intersted的增加，原因是，在获取readable, writeable后，intersted条件可能暂未满足，
+    但此时wait_next_event()应该返回True，以继续循环等待后续出现fd inteersted。
+2. tcp_socket:
+    新增了close()用来主动关闭TCP写端并在完成四次挥手后关闭tcp_main线程
+    修改了connect中tcp_thread的启动方式从run()改为了异步启动start(),
+3. tcp_connection:
+    根据wireshark抓包发现，在三次握手连接后，client发送带数据的报文时，ack置为了1，
+    故修改tcp_connection中报文的发送报头，增加了ack和ackno；
+    增加了fin_wait_1直接到time_wait的转化；
+    增加了部分log
+4. 修改了部分测试
